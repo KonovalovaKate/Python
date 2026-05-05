@@ -5,19 +5,10 @@ import sqlite3
 SYSTEM_PROMPT = {
     "role": "system",
     "content": (
-        "Ви — експерт-консультант магазину спортивних товарів 'Dokasport.com.ua'. "
-        "ВАША МЕТА: надавати персоналізовані рекомендації щодо спортивного спорядження, взуття та екіпірування, "
-        "виходячи з потреб клієнта, його рівня підготовки та цілей. "
-        "ОСНОВНІ ІНСТРУКЦІЇ: "
-        "1. КВАЛІФІКАЦІЯ: Якщо запит користувача розмитий, ви ПОВИННІ поставити 2-3 уточнюючих питання перед рекомендацією. "
-        "2. ВИБІР: Завжди пропонуйте 2-3 варіанти: 'Starter' (бюджетний), 'Performance' (оптимальний), 'Elite' (професійний). "
-        "3. ПЕРЕВАГИ НАД ХАРАКТЕРИСТИКАМИ: Пояснюйте, ЯК конкретна функція допоможе користувачеві. "
-        "4. ДОДАТКОВІ ПРОДАЖІ: Ненав'язливо пропонуйте супутні товари для повного комплекту. "
-        "ТОН ТА СТИЛЬ: Професійний, мотивуючий та обізнаний. Використовуйте заохочувальний тон 'тренера'. "
-        "ОБМЕЖЕННЯ: НЕ надавайте медичних порад. Дотримуйтесь виключно теми спорту та фітнесу."
+        "You are an expert consultant for the 'Dokasport.com.ua' sports store. "
+        "Your goal: provide personalized recommendations for equipment based on user needs."
     )
 }
-
 
 class ChatDatabase:
     def __init__(self, db_path='chat_history.db'):
@@ -31,30 +22,31 @@ class ChatDatabase:
         cursor.execute('''
                        CREATE TABLE IF NOT EXISTS messages
                        (
-                           id
-                           INTEGER
-                           PRIMARY
-                           KEY
-                           AUTOINCREMENT,
-                           role
-                           TEXT,
-                           content
-                           TEXT
+                           id INTEGER PRIMARY KEY AUTOINCREMENT,
+                           role TEXT,
+                           content TEXT
                        )
                        ''')
         conn.commit()
         conn.close()
 
     def load_messages(self):
-        """Loads chat history and prepends the system prompt."""
+        """Loads only the 10 most recent messages and prepends the system prompt."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute('SELECT role, content FROM messages ORDER BY id')
 
-        # Initialize message list with the system persona
+        # Subquery: get the last 10 records descending, then re-order them ascending for the AI context
+        cursor.execute('''
+            SELECT role, content FROM (
+                SELECT id, role, content FROM messages 
+                ORDER BY id DESC LIMIT 10
+            ) ORDER BY id ASC
+        ''')
+
+        # Start with the mandatory system persona
         messages = [SYSTEM_PROMPT]
 
-        # Append history from the database
+        # Append the retrieved history
         for row in cursor.fetchall():
             messages.append({"role": row[0], "content": row[1]})
 
@@ -69,25 +61,25 @@ class ChatDatabase:
         conn.commit()
         conn.close()
 
-
 def main():
     db = ChatDatabase()
-    # Load context (System prompt + History)
+    # Load limited context (System prompt + last 10 messages)
     messages = db.load_messages()
 
-    print("--- Консультант Dokasport готовий до роботи! ---")
-    print("(Введіть 'exit' для виходу)")
+    print("--- Dokasport Consultant is ready! ---")
+    print("(Type 'exit' to quit)")
 
     while True:
-        user_message = input("\nВи: ")
+        user_message = input("\nYou: ")
         if user_message.lower() in ['exit', 'quit']:
             break
 
+        # Save and add user input to the current session list
         messages.append({"role": "user", "content": user_message})
         db.save_message("user", user_message)
 
         try:
-            # Request to local AI server
+            # POST request to the local inference server
             response = requests.post(
                 'http://127.0.0.1:1234/v1/chat/completions',
                 json={
@@ -100,12 +92,13 @@ def main():
             ai_message = response.json()["choices"][0]["message"]["content"]
 
             print(f"\nDokasport: {ai_message}")
+
+            # Save and add AI response to session list
             messages.append({"role": "assistant", "content": ai_message})
             db.save_message("assistant", ai_message)
 
         except Exception as e:
             print(f"Request error: {e}")
-
 
 if __name__ == "__main__":
     main()
