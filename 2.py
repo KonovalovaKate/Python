@@ -28,15 +28,9 @@ class ChatDatabase:
         cursor.execute('''
                        CREATE TABLE IF NOT EXISTS messages
                        (
-                           id
-                           INTEGER
-                           PRIMARY
-                           KEY
-                           AUTOINCREMENT,
-                           role
-                           TEXT,
-                           content
-                           TEXT
+                           id INTEGER PRIMARY KEY AUTOINCREMENT,
+                           role TEXT,
+                           content TEXT
                        )
                        ''')
         conn.commit()
@@ -89,7 +83,6 @@ def main():
 
         try:
             # POST request to the local LM Studio server
-            # Model name 'google/gemma-4-e4b' as seen in image_a22078.png
             response = requests.post(
                 'http://127.0.0.1:1234/v1/chat/completions',
                 json={
@@ -104,13 +97,13 @@ def main():
             ai_message = data["choices"][0]["message"]["content"]
 
             # --- TOKEN COST CALCULATION ---
-            # Extract usage data from the response as shown in image_a22078.png
+            # Extract usage data from the API response
             usage = data.get("usage", {})
             input_tokens = usage.get("prompt_tokens", 0)
             output_tokens = usage.get("completion_tokens", 0)
             total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
 
-            # Formula for cost based on image_a22078.png logic
+            # Formula for cost based on price per 1 million tokens
             cost = (input_tokens * PRICE_INPUT_PER_1M + output_tokens * PRICE_OUTPUT_PER_1M) / 1_000_000
 
             print(f"\nDokasport: {ai_message}")
