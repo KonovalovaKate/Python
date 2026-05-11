@@ -1,19 +1,12 @@
-import requests
 import sqlite3
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
-# --- COST CONSTANTS (Prices per 1M tokens in USD) ---
-# Based on current market rates for Gemma 2 9B (e.g., via OpenRouter)
-PRICE_INPUT_PER_1M = 0.06
-PRICE_OUTPUT_PER_1M = 0.06
-
-# System prompt defining the AI's persona as a Dokasport expert
-SYSTEM_PROMPT = {
-    "role": "system",
-    "content": (
-        "You are an expert consultant for the 'Dokasport.com.ua' sports store. "
-        "Your goal: provide personalized recommendations for equipment based on user needs."
-    )
-}
+# System prompt configuration
+SYSTEM_PROMPT_CONTENT = (
+    "You are an expert consultant for the 'Dokasport.com.ua' sports store. "
+    "Your goal: provide personalized recommendations for equipment based on user needs."
+)
 
 
 class ChatDatabase:
@@ -22,26 +15,29 @@ class ChatDatabase:
         self._create_table()
 
     def _create_table(self):
-        """Creates the database schema if it doesn't exist."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''
                        CREATE TABLE IF NOT EXISTS messages
                        (
-                           id INTEGER PRIMARY KEY AUTOINCREMENT,
-                           role TEXT,
-                           content TEXT
+                           id
+                           INTEGER
+                           PRIMARY
+                           KEY
+                           AUTOINCREMENT,
+                           role
+                           TEXT,
+                           content
+                           TEXT
                        )
                        ''')
         conn.commit()
         conn.close()
 
     def load_messages(self):
-        """Loads only the 10 most recent messages and prepends the system prompt."""
+        """Loads history and converts it into LangChain message objects."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-
-        # Subquery: get the last 10 records descending, then re-order them ascending
         cursor.execute('''
                        SELECT role, content
                        FROM (SELECT id, role, content FROM messages ORDER BY id DESC LIMIT 10)
@@ -49,14 +45,18 @@ class ChatDatabase:
                        ''')
 
         # Start with the mandatory system persona
-        messages = [SYSTEM_PROMPT]
-        for row in cursor.fetchall():
-            messages.append({"role": row[0], "content": row[1]})
+        messages = [SystemMessage(content=SYSTEM_PROMPT_CONTENT)]
+
+        for role, content in cursor.fetchall():
+            if role == "user":
+                messages.append(HumanMessage(content=content))
+            elif role == "assistant":
+                messages.append(AIMessage(content=content))
+
         conn.close()
         return messages
 
     def save_message(self, role, content):
-        """Persists a new message to the SQLite database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('INSERT INTO messages (role, content) VALUES (?, ?)', (role, content))
@@ -66,56 +66,46 @@ class ChatDatabase:
 
 def main():
     db = ChatDatabase()
-    # Load history (System prompt + last 10 messages)
     messages = db.load_messages()
 
-    print("--- Dokasport Consultant is ready! (Local Mode) ---")
+    # Initialize model via LangChain
+    # Using 'openai' provider as LM Studio emulates OpenAI API
+    llm = init_chat_model(
+        model="google/gemma-4-e4b",
+        model_provider="openai",
+        base_url="http://127.0.0.1:1234/v1",
+        api_key="not-needed",
+    )
+
+    print("--- Dokasport Consultant (LangChain Mode) is ready! ---")
     print("(Type 'exit' to quit)")
 
     while True:
-        user_message = input("\nYou: ")
-        if user_message.lower() in ['exit', 'quit']:
+        user_input = input("\nYou: ")
+        if user_input.lower() in ['exit', 'quit']:
             break
 
-        # Save and add user input to the current session list
-        messages.append({"role": "user", "content": user_message})
-        db.save_message("user", user_message)
+        # Persist user input and add to session memory
+        db.save_message("user", user_input)
+        messages.append(HumanMessage(content=user_input))
 
         try:
-            # POST request to the local LM Studio server
-            response = requests.post(
-                'http://127.0.0.1:1234/v1/chat/completions',
-                json={
-                    "messages": messages,
-                    "model": "google/gemma-4-e4b",
-                    "temperature": 0.7
-                }
-            )
-            response.raise_for_status()
-
-            data = response.json()
-            ai_message = data["choices"][0]["message"]["content"]
-
-            # --- TOKEN COST CALCULATION ---
-            # Extract usage data from the API response
-            usage = data.get("usage", {})
-            input_tokens = usage.get("prompt_tokens", 0)
-            output_tokens = usage.get("completion_tokens", 0)
-            total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
-
-            # Formula for cost based on price per 1 million tokens
-            cost = (input_tokens * PRICE_INPUT_PER_1M + output_tokens * PRICE_OUTPUT_PER_1M) / 1_000_000
+            # Model invocation
+            response = llm.invoke(messages)
+            ai_message = response.content
 
             print(f"\nDokasport: {ai_message}")
-            # Print session statistics
-            print(f"[Tokens: {total_tokens} (In: {input_tokens}, Out: {output_tokens}) | Est. Cost: ${cost:.6f}]")
 
-            # Save and add AI response to session list
-            messages.append({"role": "assistant", "content": ai_message})
+            # Persist AI response
             db.save_message("assistant", ai_message)
+            messages.append(AIMessage(content=ai_message))
+
+            # Context management: Keep system prompt + last 10 messages in memory
+            if len(messages) > 11:
+                messages = [messages[0]] + messages[-10:]
 
         except Exception as e:
-            print(f"Request error: {e}")
+            print(f"Error: {e}")
 
 
 if __name__ == "__main__":
