@@ -90,15 +90,20 @@ def main():
         messages.append(HumanMessage(content=user_input))
 
         try:
-            # Model invocation
-            response = llm.invoke(messages)
-            ai_message = response.content
+            # Model invocation with streaming
+            print("\nDokasport: ", end="", flush=True)
 
-            print(f"\nDokasport: {ai_message}")
+            ai_message_content = ""
+            for chunk in llm.stream(messages):
+                content = chunk.content
+                ai_message_content += content
+                print(content, end="", flush=True)
+
+            print()  # New line after stream finishes
 
             # Persist AI response
-            db.save_message("assistant", ai_message)
-            messages.append(AIMessage(content=ai_message))
+            db.save_message("assistant", ai_message_content)
+            messages.append(AIMessage(content=ai_message_content))
 
             # Context management: Keep system prompt + last 10 messages in memory
             if len(messages) > 11:
