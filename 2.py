@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
@@ -25,15 +26,9 @@ class ChatDatabase:
         cursor.execute('''
                        CREATE TABLE IF NOT EXISTS messages
                        (
-                           id
-                           INTEGER
-                           PRIMARY
-                           KEY
-                           AUTOINCREMENT,
-                           role
-                           TEXT,
-                           content
-                           TEXT
+                           id INTEGER PRIMARY KEY AUTOINCREMENT,
+                           role TEXT,
+                           content TEXT
                        )
                        ''')
         conn.commit()
@@ -49,7 +44,6 @@ class ChatDatabase:
                        ORDER BY id ASC
                        ''')
 
-        # Start with the mandatory system persona
         messages = [SystemMessage(content=CONSULTANT_PROMPT)]
 
         for role, content in cursor.fetchall():
@@ -92,7 +86,7 @@ def main():
     while True:
         # --- USER BOT TURN ---
         user_result = ''
-        # Generate user response using USER_BOT_PROMPT
+        # Use USER_BOT_PROMPT to simulate a customer
         user_response = llm.stream([SystemMessage(content=USER_BOT_PROMPT)] + messages)
 
         print("\033[32mUser Bot: ", end='', flush=True)
@@ -104,12 +98,12 @@ def main():
         db.save_message("user", user_result)
         messages.append(HumanMessage(content=user_result))
 
-        # Pause to make the dialogue readable
+        # Optional: Manual trigger to control flow
         input("\n(Press Enter for Consultant to reply...)")
 
         # --- CONSULTANT BOT TURN ---
         consultant_result = ''
-        # Generate consultant response using CONSULTANT_PROMPT
+        # Use CONSULTANT_PROMPT to reply as the store expert
         consultant_response = llm.stream([SystemMessage(content=CONSULTANT_PROMPT)] + messages)
 
         print("\033[34mConsultant: ", end='', flush=True)
@@ -121,7 +115,7 @@ def main():
         db.save_message("assistant", consultant_result)
         messages.append(AIMessage(content=consultant_result))
 
-        # Context management: Keep last 10 messages in memory
+        # Context management: Keep last 10 messages in memory to prevent overflow
         if len(messages) > 11:
             messages = [messages[0]] + messages[-10:]
 
