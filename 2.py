@@ -3,9 +3,14 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 # System prompt configuration
-SYSTEM_PROMPT_CONTENT = (
+CONSULTANT_PROMPT = (
     "You are an expert consultant for the 'Dokasport.com.ua' sports store. "
     "Your goal: provide personalized recommendations for equipment based on user needs."
+)
+
+USER_BOT_PROMPT = (
+    "You are a customer at the 'Dokasport' sports store. You want to buy sports equipment. "
+    "Ask questions, describe your needs, and act like a real person. Keep your responses short."
 )
 
 
@@ -45,7 +50,7 @@ class ChatDatabase:
                        ''')
 
         # Start with the mandatory system persona
-        messages = [SystemMessage(content=SYSTEM_PROMPT_CONTENT)]
+        messages = [SystemMessage(content=CONSULTANT_PROMPT)]
 
         for role, content in cursor.fetchall():
             if role == "user":
@@ -66,10 +71,8 @@ class ChatDatabase:
 
 def main():
     db = ChatDatabase()
-    messages = db.load_messages()
 
     # Initialize model via LangChain
-    # Using 'openai' provider as LM Studio emulates OpenAI API
     llm = init_chat_model(
         model="google/gemma-4-e4b",
         model_provider="openai",
@@ -77,40 +80,50 @@ def main():
         api_key="not-needed",
     )
 
-    print("--- Dokasport Consultant (LangChain Mode) is ready! ---")
-    print("(Type 'exit' to quit)")
+    # Initial greeting from Consultant
+    initial_greeting = "Добрий день! Вітаємо у магазині Dokasport. Чим можу допомогти вам сьогодні?"
+    print(f"Consultant: {initial_greeting}")
+
+    messages = [AIMessage(content=initial_greeting)]
+    db.save_message("assistant", initial_greeting)
+
+    print("\n--- Automatic Bot-to-Bot Dialogue Started ---")
 
     while True:
-        user_input = input("\nYou: ")
-        if user_input.lower() in ['exit', 'quit']:
-            break
+        # --- USER BOT TURN ---
+        user_result = ''
+        # Generate user response using USER_BOT_PROMPT
+        user_response = llm.stream([SystemMessage(content=USER_BOT_PROMPT)] + messages)
 
-        # Persist user input and add to session memory
-        db.save_message("user", user_input)
-        messages.append(HumanMessage(content=user_input))
+        print("\033[32mUser Bot: ", end='', flush=True)
+        for chunk in user_response:
+            user_result += chunk.content
+            print(chunk.content, end='', flush=True)
+        print('\033[0m')
 
-        try:
-            # Model invocation with streaming
-            print("\nDokasport: ", end="", flush=True)
+        db.save_message("user", user_result)
+        messages.append(HumanMessage(content=user_result))
 
-            ai_message_content = ""
-            for chunk in llm.stream(messages):
-                content = chunk.content
-                ai_message_content += content
-                print(content, end="", flush=True)
+        # Pause to make the dialogue readable
+        input("\n(Press Enter for Consultant to reply...)")
 
-            print()  # New line after stream finishes
+        # --- CONSULTANT BOT TURN ---
+        consultant_result = ''
+        # Generate consultant response using CONSULTANT_PROMPT
+        consultant_response = llm.stream([SystemMessage(content=CONSULTANT_PROMPT)] + messages)
 
-            # Persist AI response
-            db.save_message("assistant", ai_message_content)
-            messages.append(AIMessage(content=ai_message_content))
+        print("\033[34mConsultant: ", end='', flush=True)
+        for chunk in consultant_response:
+            consultant_result += chunk.content
+            print(chunk.content, end='', flush=True)
+        print('\033[0m')
 
-            # Context management: Keep system prompt + last 10 messages in memory
-            if len(messages) > 11:
-                messages = [messages[0]] + messages[-10:]
+        db.save_message("assistant", consultant_result)
+        messages.append(AIMessage(content=consultant_result))
 
-        except Exception as e:
-            print(f"Error: {e}")
+        # Context management: Keep last 10 messages in memory
+        if len(messages) > 11:
+            messages = [messages[0]] + messages[-10:]
 
 
 if __name__ == "__main__":
