@@ -1,7 +1,17 @@
+import os
 import sqlite3
 import time
+
+Key = ""
+exec(open(f"{os.path.dirname(__file__)}/.env").read())
+os.environ["LANGSMITH_API_KEY"] = Key
+os.environ["LANGSMITH_TRACING"] = "true"
+os.environ["LANGSMITH_PROJECT"] = "dokasport-chat"
+
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langsmith import traceable
+
 
 # System prompts for both roles
 CONSULTANT_PROMPT = (
@@ -42,10 +52,52 @@ class ChatDatabase:
         conn.close()
 
 
+def stream_response(llm, system_prompt, messages, color_code, label):
+    result = ''
+    response = llm.stream([SystemMessage(content=system_prompt)] + messages)
+
+    print(f'\033[{color_code}m{label}: ', end='', flush=True)
+    for chunk in response:
+        result += chunk.content
+        print(chunk.content, end='', flush=True)
+    print('\033[0m')
+
+    return result
+
+
+@traceable(name="user_bot_turn", run_type="chain")
+def run_user_turn(llm, messages):
+    return stream_response(llm, USER_PROMPT, messages, '32', 'User')
+
+
+@traceable(name="consultant_bot_turn", run_type="chain")
+def run_consultant_turn(llm, messages):
+    return stream_response(llm, CONSULTANT_PROMPT, messages, '34', 'Consultant')
+
+
+@traceable(name="conversation_turn", run_type="chain")
+def run_conversation_turn(llm, db, messages):
+    user_result = run_user_turn(llm, messages)
+    db.save_message("user", user_result)
+    messages.append(HumanMessage(content=user_result))
+    time.sleep(1)
+
+    consultant_result = run_consultant_turn(llm, messages)
+    print()
+    db.save_message("assistant", consultant_result)
+    messages.append(AIMessage(content=consultant_result))
+
+    if len(messages) > 10:
+        messages = messages[-10:]
+
+    time.sleep(1)
+    return messages
+
+
+@traceable(name="dokasport_simulation", run_type="chain")
 def main():
     db = ChatDatabase()
 
-    # Initialize model via LangChain
     llm = init_chat_model(
         model="google/gemma-4-e4b",
         model_provider="openai",
@@ -53,7 +105,6 @@ def main():
         api_key="dqssd",
     )
 
-    # Initial state
     initial_msg = "Привіт! Чим можу допомогти у виборі спорядження?"
     print(f"Consultant: {initial_msg}")
 
@@ -61,38 +112,7 @@ def main():
     db.save_message("assistant", initial_msg)
 
     while True:
-        # --- USER BOT TURN ---
-        user_result = ''
-        user_response = llm.stream([SystemMessage(content=USER_PROMPT)] + messages)
-
-        print('\033[32mUser: ', end='', flush=True)
-        for chunk in user_response:
-            user_result += chunk.content
-            print(chunk.content, end='', flush=True)
-        print('\033[0m')
-
-        db.save_message("user", user_result)
-        messages.append(HumanMessage(content=user_result))
-        time.sleep(1)
-
-        # --- CONSULTANT BOT TURN ---
-        consultant_result = ''
-        consultant_response = llm.stream([SystemMessage(content=CONSULTANT_PROMPT)] + messages)
-
-        print('\033[34mConsultant: ', end='', flush=True)
-        for chunk in consultant_response:
-            consultant_result += chunk.content
-            print(chunk.content, end='', flush=True)
-        print('\033[0m\n')
-
-        db.save_message("assistant", consultant_result)
-        messages.append(AIMessage(content=consultant_result))
-
-        # Context management: keep last 10 messages
-        if len(messages) > 10:
-            messages = messages[-10:]
-
-        time.sleep(1)
+        messages = run_conversation_turn(llm, db, messages)
 
 
 if __name__ == "__main__":
