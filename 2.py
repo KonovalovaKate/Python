@@ -1,16 +1,13 @@
-import os
 import sqlite3
 import time
+from pathlib import Path
 
-Key = ""
-exec(open(f"{os.path.dirname(__file__)}/.env").read())
-os.environ["LANGSMITH_API_KEY"] = Key
-os.environ["LANGSMITH_TRACING"] = "true"
-os.environ["LANGSMITH_PROJECT"] = "dokasport-chat"
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env")
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from langsmith import traceable
 
 
 # System prompts for both roles
@@ -65,17 +62,14 @@ def stream_response(llm, system_prompt, messages, color_code, label):
     return result
 
 
-@traceable(name="user_bot_turn", run_type="chain")
 def run_user_turn(llm, messages):
     return stream_response(llm, USER_PROMPT, messages, '32', 'User')
 
 
-@traceable(name="consultant_bot_turn", run_type="chain")
 def run_consultant_turn(llm, messages):
     return stream_response(llm, CONSULTANT_PROMPT, messages, '34', 'Consultant')
 
 
-@traceable(name="conversation_turn", run_type="chain")
 def run_conversation_turn(llm, db, messages):
     user_result = run_user_turn(llm, messages)
     db.save_message("user", user_result)
@@ -94,7 +88,6 @@ def run_conversation_turn(llm, db, messages):
     return messages
 
 
-@traceable(name="dokasport_simulation", run_type="chain")
 def main():
     db = ChatDatabase()
 

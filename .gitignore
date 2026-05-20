@@ -1,5 +1,4 @@
 .env
-langsmith_api_key.txt
 .venv/
 __pycache__/
 *.pyc
