@@ -1,10 +1,9 @@
 import sqlite3
 import time
-from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv()
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
