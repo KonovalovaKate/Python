@@ -1,0 +1,13 @@
+[project]
+name = "python"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "langchain>=0.3.30",
+    "langchain-core>=0.3.86",
+    "langchain-openai>=0.3.0",
+    "langgraph-cli[inmem]>=0.4.3",
+    "python-dotenv>=1.2.1",
+]
