@@ -1,21 +1,16 @@
-from langchain_core.messages import SystemMessage
-from langgraph.graph.message import MessagesState
+from langchain.agents import create_agent
 
 from services.llm_factory import get_llm
+from tools.payment import get_payment_info
 
 PAYMENT_PROMPT = (
     "Ти асистент з оформлення замовлень магазину 'Dokasport.com.ua'. "
     "Відповідай українською. "
-    "Способи оплати: оплата при отриманні (Нова Пошта / Укрпошта), "
-    "онлайн-оплата карткою на сайті, передоплата на картку ПриватБанку. "
-    "Для замовлення: https://dokasport.com.ua . "
-    "Допоможи клієнту оформити замовлення."
+    "Для інформації про способи оплати та оформлення замовлення — виклич get_payment_info."
 )
 
-_llm = get_llm()
-
-
-def payment_node(state: MessagesState) -> dict:
-    system = SystemMessage(content=PAYMENT_PROMPT)
-    response = _llm.invoke([system] + state["messages"])
-    return {"messages": [response]}
+payment_agent = create_agent(
+    model=get_llm(),
+    tools=[get_payment_info],
+    system_prompt=PAYMENT_PROMPT,
+)
