@@ -1,59 +1,54 @@
 from typing import Annotated, Literal
-from typing_extensions import TypedDict
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, tools_condition
+from typing_extensions import TypedDict
 
-from agents.guide import GUIDE_TOOLS, guide_node
+from agents.guide import guide_node
 from agents.payment import payment_node
-from services.llm_factory import get_llm
 
-ORCHESTRATOR_PROMPT = (
-    "You are the routing orchestrator for the Dokasport corset store assistant. "
-    "Analyze the user's latest message and decide which agent should handle it. "
-    "Reply with exactly one word:\n"
-    "- 'payment' — if the user wants to buy, pay, place an order, or asks about checkout/delivery\n"
-    "- 'guide'   — if the user asks about products, sizes, or needs a recommendation"
-)
-
-_orchestrator_llm = get_llm()
+PAYMENT_KEYWORDS = [
+    "купити", "купить", "оплата", "оплатити", "оплатить",
+    "замовити", "замовлення", "заказать", "заказ",
+    "buy", "pay", "order", "checkout",
+]
 
 
-class AgentState(TypedDict):
+class State(TypedDict):
     messages: Annotated[list, add_messages]
     next: str
 
 
-def orchestrator_node(state: AgentState) -> dict:
-    messages = [SystemMessage(content=ORCHESTRATOR_PROMPT)] + state["messages"]
-    response = _orchestrator_llm.invoke(messages)
-    decision = response.content.strip().lower()
-    return {"next": "payment" if "payment" in decision else "guide"}
+def supervisor_node(state: State) -> dict:
+    last = state["messages"][-1]
+    # Only route to an agent when the last message is from a human
+    if not isinstance(last, HumanMessage):
+        return {"next": "__end__"}
+    text = last.content.lower() if hasattr(last, "content") else ""
+    if any(kw in text for kw in PAYMENT_KEYWORDS):
+        return {"next": "payment_agent"}
+    return {"next": "guide_agent"}
 
 
-def route_from_orchestrator(state: AgentState) -> Literal["payment", "guide"]:
-    return state.get("next", "guide")
+def route(state: State) -> Literal["guide_agent", "payment_agent", "__end__"]:
+    return state["next"]
 
 
-builder = StateGraph(AgentState)
-builder.add_node("orchestrator", orchestrator_node)
-builder.add_node("payment", payment_node)
-builder.add_node("guide", guide_node)
-builder.add_node("tools", ToolNode(GUIDE_TOOLS))
+builder = StateGraph(State)
+builder.add_node("supervisor", supervisor_node)
+builder.add_node("guide_agent", guide_node)
+builder.add_node("payment_agent", payment_node)
 
-builder.add_edge(START, "orchestrator")
-builder.add_conditional_edges("orchestrator", route_from_orchestrator)
-builder.add_conditional_edges("guide", tools_condition)
-builder.add_edge("tools", "guide")
+builder.add_edge(START, "supervisor")
+builder.add_conditional_edges("supervisor", route, ["guide_agent", "payment_agent", END])
+builder.add_edge("guide_agent", "supervisor")
+builder.add_edge("payment_agent", "supervisor")
 
 agent = builder.compile()
 
 
 if __name__ == "__main__":
-    from langchain_core.messages import HumanMessage
-
     messages = []
     while True:
         user_input = input("You: ")
